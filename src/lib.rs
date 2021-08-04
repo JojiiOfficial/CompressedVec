@@ -1,5 +1,6 @@
 use std::{
     io::{Cursor, Read, Write},
+    iter::FromIterator,
     mem::size_of,
 };
 
@@ -7,7 +8,7 @@ use bitpacking::{BitPacker, BitPacker8x};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 /// A compressed Vec<u32>
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct CVec {
     /// The compressed Data
     data: Vec<(u8, Vec<u8>)>,
@@ -32,7 +33,7 @@ impl CVec {
         let mut data = Vec::with_capacity(req_blocks);
 
         for _ in 0..req_blocks {
-            data.push((0, Vec::with_capacity(1024)));
+            data.push((0, Vec::with_capacity(256)));
         }
 
         Self { data, items: 0 }
@@ -45,7 +46,7 @@ impl CVec {
         let mut len = size_of::<usize>() * 2;
 
         for block in self.data.iter() {
-            // u8
+            // u8 size
             len += 1;
             // block  size
             len += block.1.len();
@@ -223,6 +224,99 @@ impl CVec {
     }
 }
 
+/// Helper type to iterate a CVec
+pub struct CVecIter {
+    vec: CVec,
+    pos: usize,
+    buf: Vec<u32>,
+}
+
+impl Iterator for CVecIter {
+    type Item = u32;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        // TODO don't decode on each `next` call. Cache decoded vector in `CVecIter`
+        let val = self.vec.get(self.pos)?;
+        self.pos += 1;
+        Some(val)
+    }
+}
+
+impl IntoIterator for CVec {
+    type Item = u32;
+
+    type IntoIter = CVecIter;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        CVecIter {
+            vec: self,
+            pos: 0,
+            buf: Vec::new(),
+        }
+    }
+}
+
+impl FromIterator<u32> for CVec {
+    #[inline]
+    fn from_iter<T: IntoIterator<Item = u32>>(iter: T) -> Self {
+        let mut new = CVec::new();
+
+        for i in iter {
+            new.push(i);
+        }
+
+        new
+    }
+}
+
+impl<T: AsRef<[u32]>> PartialEq<T> for CVec {
+    #[inline]
+    fn eq(&self, other: &T) -> bool {
+        let other = other.as_ref();
+        if self.len() != other.len() {
+            return false;
+        }
+
+        for pos in 0..self.len() {
+            if self.get(pos) != other.get(pos).map(|i| *i) {
+                return false;
+            }
+        }
+
+        true
+    }
+}
+
+impl PartialEq<CVec> for Vec<u32> {
+    #[inline]
+    fn eq(&self, other: &CVec) -> bool {
+        other.eq(&self.as_slice())
+    }
+}
+
+impl PartialEq<CVec> for [u32] {
+    #[inline]
+    fn eq(&self, other: &CVec) -> bool {
+        other.eq(&self)
+    }
+}
+
+impl PartialEq<CVec> for &[u32] {
+    #[inline]
+    fn eq(&self, other: &CVec) -> bool {
+        other.eq(self)
+    }
+}
+
+impl PartialEq<Self> for CVec {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.len() == other.len() && self.data == other.data
+    }
+}
+
 #[cfg(test)]
 pub mod test {
     use super::*;
@@ -379,5 +473,46 @@ pub mod test {
         assert_eq!(CVec::req_block_count(512), 2);
         assert_eq!(CVec::req_block_count(513), 3);
         assert_eq!(CVec::req_block_count(1024), 4);
+    }
+
+    #[test]
+    fn test_iterator() {
+        let mut v = CVec::new();
+        let test_data = (0..4).collect::<Vec<_>>();
+        for i in test_data.iter() {
+            v.push(*i);
+        }
+
+        let mut iter = v.into_iter();
+
+        assert_eq!(iter.next(), Some(0));
+        assert_eq!(iter.next(), Some(1));
+        assert_eq!(iter.next(), Some(2));
+        assert_eq!(iter.next(), Some(3));
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn test_from_iter() {
+        let inp = (0..10).into_iter();
+
+        let collected = inp.clone().collect::<CVec>();
+
+        for (got, exp) in collected.into_iter().zip(inp.into_iter()) {
+            assert_eq!(got, exp);
+        }
+    }
+
+    #[test]
+    fn test_cmp_vec() {
+        let inp = (0..10).into_iter();
+
+        let vec = inp.clone().collect::<Vec<_>>();
+        let cvec = inp.collect::<CVec>();
+
+        assert_eq!(vec, cvec);
+        assert_eq!(cvec, vec);
+        assert_eq!(cvec, &vec[..]);
+        assert_ne!(cvec, &vec[3..]);
     }
 }
