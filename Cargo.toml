@@ -8,3 +8,14 @@ edition = "2018"
 [dependencies]
 bitpacking = "0.8.4"
 byteorder = "1.4.3"
+
+[dev-dependencies]
+criterion = "0.3.5"
+
+[[bench]]
+name = "bench1"
+harness = false
+
+[[bench]]
+name = "std_vec"
+harness = false

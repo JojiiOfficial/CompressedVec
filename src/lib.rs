@@ -146,14 +146,14 @@ impl CVec {
         // For the rest (if available) we're allocating new blocks which we fill and add
         if items > pushed {
             let to_push_left = items - pushed;
-            let mut new_blocks = vec![(0u8, Vec::<u8>::new()); (to_push_left / 256) + 1];
 
-            for nb_pos in 0..(to_push_left / 256) + 1 {
-                let num_bits = Self::compress_block(
-                    iter.by_ref().take(256).collect(),
-                    &mut new_blocks[nb_pos].1,
-                );
-                new_blocks[nb_pos].0 = num_bits;
+            let blocks_needed = (to_push_left / 256) + 1;
+            let mut new_blocks = vec![(0u8, Vec::<u8>::new()); blocks_needed];
+
+            for nb_pos in 0..blocks_needed {
+                let block_data_raw = iter.by_ref().take(256).collect();
+                new_blocks[nb_pos].0 =
+                    Self::compress_block(block_data_raw, &mut new_blocks[nb_pos].1);
             }
 
             self.data.extend(new_blocks);
