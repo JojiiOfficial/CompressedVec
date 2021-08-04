@@ -71,7 +71,7 @@ impl FromIterator<u32> for CVec {
     #[inline]
     fn from_iter<T: IntoIterator<Item = u32>>(iter: T) -> Self {
         let mut new = CVec::new();
-        new.extend(iter.into_iter().collect::<Vec<_>>().into_iter());
+        new.extend(iter);
         new
     }
 }

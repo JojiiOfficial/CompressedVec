@@ -35,30 +35,30 @@ impl PartialEq<CVec> for &[u32] {
     }
 }
 
-impl From<&CVec> for Vec<u32> {
+impl<T: Into<u32> + Copy> From<&Vec<T>> for CVec {
+    #[inline]
+    fn from(vec: &Vec<T>) -> Self {
+        vec.iter().map(|i| (*i).into()).collect::<CVec>()
+    }
+}
+
+impl<T: Into<u32>> From<Vec<T>> for CVec {
+    #[inline]
+    fn from(vec: Vec<T>) -> Self {
+        vec.into_iter().map(|i| i.into()).collect::<CVec>()
+    }
+}
+
+impl<T: From<u32>> From<&CVec> for Vec<T> {
     #[inline]
     fn from(cvec: &CVec) -> Self {
-        cvec.iter().collect()
+        cvec.iter().map(|i| i.into()).collect()
     }
 }
 
-impl From<CVec> for Vec<u32> {
+impl<T: From<u32>> From<CVec> for Vec<T> {
     #[inline]
     fn from(cvec: CVec) -> Self {
-        cvec.into_iter().collect::<Vec<u32>>()
-    }
-}
-
-impl From<&Vec<u32>> for CVec {
-    #[inline]
-    fn from(vec: &Vec<u32>) -> Self {
-        vec.iter().copied().collect::<Self>()
-    }
-}
-
-impl From<Vec<u32>> for CVec {
-    #[inline]
-    fn from(vec: Vec<u32>) -> Self {
-        vec.into_iter().collect::<Self>()
+        cvec.into_iter().map(|i| T::from(i)).collect::<Vec<T>>()
     }
 }

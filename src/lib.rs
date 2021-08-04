@@ -360,6 +360,7 @@ impl Extend<u32> for CVec {
             self.items += pushed;
         }
 
+        // Push rest of `iter` into new block(s)
         let mut block = Vec::new();
         for to_add in iter.by_ref().chunked(256) {
             self.items += to_add.len();
