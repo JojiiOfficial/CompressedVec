@@ -1,17 +1,23 @@
-use std::{
-    io::{Cursor, Read, Write},
-    iter::FromIterator,
-    mem::size_of,
-};
+pub mod buffered;
+pub mod iter;
+pub mod traits;
 
 use bitpacking::{BitPacker, BitPacker8x};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use iter::CVecIterRef;
+use std::{
+    io::{Cursor, Read, Write},
+    mem::size_of,
+};
+use traits::{Compress, Decompress};
 
-/// A compressed Vec<u32>
+/// A compressed Vec<u32> which can be compress up to 4 times in size. The level of compression
+/// depends on the actual value of each number pushed on the cvec.
 #[derive(Clone, Debug)]
 pub struct CVec {
     /// The compressed Data
     data: Vec<(u8, Vec<u8>)>,
+
     /// Count of items in the vector
     items: usize,
 }
@@ -26,7 +32,7 @@ impl CVec {
         }
     }
 
-    /// Allocate a new Compressed vector which can store `capacity` numbers without reallocating
+    /// Allocate a new compressed vector which can store `capacity` numbers without reallocating
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         let req_blocks = Self::req_block_count(capacity);
@@ -76,20 +82,24 @@ impl CVec {
     /// Pushes a new value on top of the vector
     pub fn push(&mut self, val: u32) {
         if self.data.is_empty() || self.need_new_block() {
-            let (enc, num_bits) = Self::compress_block(vec![val]);
-            self.data.push((num_bits, enc));
+            let mut new_block = Vec::with_capacity(256);
+            let num_bits = Self::compress_block(vec![val], &mut new_block);
+            self.data.push((num_bits, new_block));
         } else {
             let block_nr = self.last_block();
 
             // decompress last block
-            let mut block = self.decompress_block(block_nr).unwrap();
+            let mut block = vec![0u32; BitPacker8x::BLOCK_LEN];
+            self.decompress_block(block_nr, &mut block).unwrap();
 
             // Set value at position
             block[self.items % 256] = val;
 
+            let mut out_block = self.data.get_mut(block_nr).unwrap();
+
             // Compress block again
-            let (enc, num_bits) = Self::compress_block(block);
-            *self.data.get_mut(block_nr).unwrap() = (num_bits, enc);
+            let bit_size = Self::compress_block(block, &mut out_block.1);
+            out_block.0 = bit_size;
         }
 
         self.items += 1;
@@ -107,16 +117,20 @@ impl CVec {
         self.items -= 1;
 
         if self.items % 256 == 0 {
-            let block_nr = self.items / 256;
+            let block_nr = self.last_block();
             self.data.remove(block_nr);
         }
 
         Some(popped)
     }
 
-    /// Returns the last item of the vec
+    /// Returns the last number in the vector. `None` if `self.len() == 0`
     #[inline]
     pub fn last(&self) -> Option<u32> {
+        if self.is_empty() {
+            return None;
+        }
+
         self.get(self.len() - 1)
     }
 
@@ -126,7 +140,51 @@ impl CVec {
         if pos >= self.items {
             return None;
         }
-        self.decompress_block(pos / 256)?.get(pos % 256).map(|i| *i)
+
+        let mut decompressed = vec![0u32; BitPacker8x::BLOCK_LEN];
+
+        self.decompress_block(Self::pos_block(pos), &mut decompressed)?;
+        decompressed.get(Self::pos_in_block(pos)).map(|i| *i)
+    }
+
+    /// Returns an referenced iterator over the vector's elements
+    #[inline]
+    pub fn iter<'a>(&'a self) -> CVecIterRef<'a> {
+        CVecIterRef::new(self)
+    }
+
+    /// Returns the block `pos` is stored in
+    #[inline]
+    pub(crate) fn pos_block(pos: usize) -> usize {
+        pos / 256
+    }
+
+    /// Returns the position of `pos` in a block
+    #[inline]
+    pub(crate) fn pos_in_block(pos: usize) -> usize {
+        pos % 256
+    }
+
+    /// Returns the index in `self.data` of the last block
+    #[inline]
+    pub(crate) fn last_block(&self) -> usize {
+        Self::pos_block(self.items)
+    }
+
+    /// Returns true if a new block needs to be allocated.
+    #[inline]
+    fn need_new_block(&self) -> bool {
+        self.items / 256 >= self.data.len()
+    }
+
+    /// Returns the amount of blocks required to store `size` elements
+    #[inline]
+    fn req_block_count(size: usize) -> usize {
+        if size % 256 != 0 {
+            Self::pos_block(size) + 1
+        } else {
+            Self::pos_block(size)
+        }
     }
 
     /// Returns a Vec of bytes representing the Vector. This can be used to store it in a file or
@@ -154,7 +212,6 @@ impl CVec {
         let mut new = Self::new();
 
         new.items = reader.read_u64::<LittleEndian>()? as usize;
-
         let blocks = reader.read_u32::<LittleEndian>()?;
 
         for _ in 0..blocks {
@@ -169,26 +226,15 @@ impl CVec {
 
         Ok(new)
     }
+}
 
-    /// Returns the index in `self.data` of the last block
-    fn last_block(&self) -> usize {
-        self.items / 256
-    }
-
-    /// Returns the amount of blocks required to store `size` elements
-    fn req_block_count(size: usize) -> usize {
-        if size % 256 != 0 {
-            (size / 256) + 1
-        } else {
-            size / 256
-        }
-    }
-
-    /// Compresse a Vec<u32>
+impl Compress for CVec {
+    /// Compresses a Vec<u32>
     ///
     /// # Panics
     /// Panics if data.len() > 256
-    fn compress_block(mut data: Vec<u32>) -> (Vec<u8>, u8) {
+    #[inline]
+    fn compress_block(mut data: Vec<u32>, out: &mut Vec<u8>) -> u8 {
         assert!(data.len() <= 256);
 
         if data.len() < 256 {
@@ -197,322 +243,32 @@ impl CVec {
 
         let bitpacker = BitPacker8x::new();
         let num_bits: u8 = bitpacker.num_bits(&data);
-        let mut compressed = vec![0u8; 4 * BitPacker8x::BLOCK_LEN];
-        let compressed_len = bitpacker.compress(&data, &mut compressed[..], num_bits);
-        (compressed[..compressed_len].to_owned(), num_bits)
-    }
 
-    /// Decompress a given block
+        let out_size = 32 * num_bits as usize;
+        out.resize(out_size, 0);
+
+        bitpacker.compress(&data, out, num_bits);
+        num_bits
+    }
+}
+
+impl Decompress for CVec {
+    /// Decompress a given block at `index`
     ///
     /// Returns `None` if there is no such block.
-    fn decompress_block(&self, index: usize) -> Option<Vec<u32>> {
+    #[inline]
+    fn decompress_block(&self, index: usize, out: &mut Vec<u32>) -> Option<()> {
         let bitpacker = BitPacker8x::new();
+
         let (num_bits, block) = self.data.get(index)?;
-        let mut decompressed = vec![0u32; BitPacker8x::BLOCK_LEN];
+
+        if out.len() != BitPacker8x::BLOCK_LEN {
+            out.resize(BitPacker8x::BLOCK_LEN, 0);
+        }
 
         let compressed_len = (*num_bits as usize) * BitPacker8x::BLOCK_LEN / 8;
+        bitpacker.decompress(&block[..compressed_len], out, *num_bits);
 
-        bitpacker.decompress(&block[..compressed_len], &mut decompressed[..], *num_bits);
-
-        Some(decompressed)
-    }
-
-    /// Returns true if a new block needs to be allocated.
-    #[inline]
-    fn need_new_block(&self) -> bool {
-        self.items / 256 >= self.data.len()
-    }
-}
-
-/// Helper type to iterate a CVec
-pub struct CVecIter {
-    vec: CVec,
-    pos: usize,
-    buf: Vec<u32>,
-}
-
-impl Iterator for CVecIter {
-    type Item = u32;
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        // TODO don't decode on each `next` call. Cache decoded vector in `CVecIter`
-        let val = self.vec.get(self.pos)?;
-        self.pos += 1;
-        Some(val)
-    }
-}
-
-impl IntoIterator for CVec {
-    type Item = u32;
-
-    type IntoIter = CVecIter;
-
-    #[inline]
-    fn into_iter(self) -> Self::IntoIter {
-        CVecIter {
-            vec: self,
-            pos: 0,
-            buf: Vec::new(),
-        }
-    }
-}
-
-impl FromIterator<u32> for CVec {
-    #[inline]
-    fn from_iter<T: IntoIterator<Item = u32>>(iter: T) -> Self {
-        let mut new = CVec::new();
-
-        for i in iter {
-            new.push(i);
-        }
-
-        new
-    }
-}
-
-impl<T: AsRef<[u32]>> PartialEq<T> for CVec {
-    #[inline]
-    fn eq(&self, other: &T) -> bool {
-        let other = other.as_ref();
-        if self.len() != other.len() {
-            return false;
-        }
-
-        for pos in 0..self.len() {
-            if self.get(pos) != other.get(pos).map(|i| *i) {
-                return false;
-            }
-        }
-
-        true
-    }
-}
-
-impl PartialEq<CVec> for Vec<u32> {
-    #[inline]
-    fn eq(&self, other: &CVec) -> bool {
-        other.eq(&self.as_slice())
-    }
-}
-
-impl PartialEq<CVec> for [u32] {
-    #[inline]
-    fn eq(&self, other: &CVec) -> bool {
-        other.eq(&self)
-    }
-}
-
-impl PartialEq<CVec> for &[u32] {
-    #[inline]
-    fn eq(&self, other: &CVec) -> bool {
-        other.eq(self)
-    }
-}
-
-impl PartialEq<Self> for CVec {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.len() == other.len() && self.data == other.data
-    }
-}
-
-#[cfg(test)]
-pub mod test {
-    use super::*;
-
-    #[test]
-    fn test_alloc_new() {
-        let mut v = CVec::new();
-        assert!(v.need_new_block());
-        v.push(1);
-        assert!(!v.need_new_block());
-    }
-
-    #[test]
-    fn test_push_with_capacity() {
-        let test_data = (0..9000).collect::<Vec<_>>();
-
-        let mut v = CVec::with_capacity(10000);
-        for i in test_data.iter() {
-            v.push(*i);
-        }
-        assert_eq!(v.len(), test_data.len());
-
-        for (pos, i) in test_data.iter().enumerate() {
-            assert_eq!(v.get(pos).unwrap(), *i);
-        }
-    }
-
-    #[test]
-    fn test_pop_with_capacity() {
-        let mut v = CVec::with_capacity(1000);
-        let mut rv = Vec::new();
-        let test_data = (0..20).collect::<Vec<_>>();
-
-        for (pos, i) in test_data.iter().enumerate() {
-            v.push(*i);
-            rv.push(*i);
-
-            if pos % 2 == 0 {
-                v.pop();
-                rv.pop();
-            }
-        }
-
-        let new_len = test_data.len() / 2;
-
-        assert!(v.len() == new_len);
-        assert!(rv.len() == v.len());
-
-        for _ in 0..new_len {
-            assert_eq!(v.pop(), rv.pop());
-        }
-
-        let test_data = (0..4999).collect::<Vec<_>>();
-
-        let mut v = CVec::new();
-        for i in test_data.iter() {
-            v.push(*i);
-        }
-
-        for i in test_data.iter().rev() {
-            assert_eq!(v.pop().unwrap(), *i);
-        }
-    }
-
-    #[test]
-    fn test_push() {
-        let test_data = (0..4999).collect::<Vec<_>>();
-
-        let mut v = CVec::new();
-        for i in test_data.iter() {
-            v.push(*i);
-        }
-        assert_eq!(v.len(), test_data.len());
-
-        for (pos, i) in test_data.iter().enumerate() {
-            assert_eq!(v.get(pos).unwrap(), *i);
-        }
-    }
-
-    #[test]
-    fn test_pop_simple() {
-        let mut v = CVec::new();
-        let test_data = (0..1024).collect::<Vec<_>>();
-        for i in test_data.iter() {
-            v.push(*i);
-        }
-
-        for i in test_data.iter().rev() {
-            assert_eq!(v.pop().unwrap(), *i);
-        }
-
-        assert!(v.data.is_empty());
-    }
-
-    #[test]
-    fn test_pop() {
-        let mut v = CVec::new();
-        let mut rv = Vec::new();
-        let test_data = (0..20).collect::<Vec<_>>();
-
-        for (pos, i) in test_data.iter().enumerate() {
-            v.push(*i);
-            rv.push(*i);
-
-            if pos % 2 == 0 {
-                v.pop();
-                rv.pop();
-            }
-        }
-
-        let new_len = test_data.len() / 2;
-
-        assert!(v.len() == new_len);
-        assert!(rv.len() == v.len());
-
-        for _ in 0..new_len {
-            assert_eq!(v.pop(), rv.pop());
-        }
-
-        assert!(rv.is_empty());
-        assert!(v.data.is_empty());
-        assert!(v.is_empty());
-    }
-
-    #[test]
-    fn test_capacity() {
-        let v = CVec::with_capacity(1000);
-        assert_eq!(v.capacity(), 1024);
-    }
-
-    #[test]
-    fn test_encoding() {
-        let mut v = CVec::new();
-        let test_data = (0..9999).collect::<Vec<_>>();
-        for i in test_data.iter() {
-            v.push(*i);
-        }
-
-        let bytes = v.as_bytes();
-        println!("len: {}", bytes.len());
-        println!("raw len: {}", test_data.len() * 4);
-
-        let new = CVec::from_bytes(&bytes);
-        assert!(new.is_ok());
-        assert_eq!(new.unwrap(), v);
-    }
-
-    #[test]
-    fn test_req_blocks() {
-        assert_eq!(CVec::req_block_count(0), 0);
-        assert_eq!(CVec::req_block_count(1), 1);
-        assert_eq!(CVec::req_block_count(256), 1);
-        assert_eq!(CVec::req_block_count(257), 2);
-        assert_eq!(CVec::req_block_count(512), 2);
-        assert_eq!(CVec::req_block_count(513), 3);
-        assert_eq!(CVec::req_block_count(1024), 4);
-    }
-
-    #[test]
-    fn test_iterator() {
-        let mut v = CVec::new();
-        let test_data = (0..4).collect::<Vec<_>>();
-        for i in test_data.iter() {
-            v.push(*i);
-        }
-
-        let mut iter = v.into_iter();
-
-        assert_eq!(iter.next(), Some(0));
-        assert_eq!(iter.next(), Some(1));
-        assert_eq!(iter.next(), Some(2));
-        assert_eq!(iter.next(), Some(3));
-        assert_eq!(iter.next(), None);
-    }
-
-    #[test]
-    fn test_from_iter() {
-        let inp = (0..10).into_iter();
-
-        let collected = inp.clone().collect::<CVec>();
-
-        for (got, exp) in collected.into_iter().zip(inp.into_iter()) {
-            assert_eq!(got, exp);
-        }
-    }
-
-    #[test]
-    fn test_cmp_vec() {
-        let inp = (0..10).into_iter();
-
-        let vec = inp.clone().collect::<Vec<_>>();
-        let cvec = inp.collect::<CVec>();
-
-        assert_eq!(vec, cvec);
-        assert_eq!(cvec, vec);
-        assert_eq!(cvec, &vec[..]);
-        assert_ne!(cvec, &vec[3..]);
+        Some(())
     }
 }
