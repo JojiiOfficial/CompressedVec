@@ -1,5 +1,5 @@
 # CompressedVec
-An up to 4x compressed `Vec<u32>`
+An up to 8x compressed `Vec<u32>`
 
 # Example
 ```rust
@@ -46,7 +46,7 @@ fn main(){
 ```
 
 # Benchmark
-Here are the benchmark results on my hardware (Ryzen5 2600 ・2GB DDR4 2666MHz) <br>
+Here are the benchmark results on my hardware (Ryzen5 2600 ・32GB DDR4 2666MHz) <br>
 
 ```
 push                    time:   [144.79 ns 145.74 ns 146.88 ns]
@@ -70,3 +70,34 @@ pop                     time:   [564.90 ps 566.68 ps 569.01 ps]
 
 As you can see in those benchmarks, this is not meant to be a replacement for `Vec<u32>`. <br>
 It should be used where (memory)size matters and only if you can trade off some performance.
+
+# Memory benefits
+
+Iter from (0..10000) collected:
+```
+CVec:           15.5 kb
+Vec<u32>:       39.1 kb
+```
+
+Iter from (0..9000000) collected:
+```
+CVec:           23.8 MB
+Vec<u32>:       34.3 MB
+```
+
+10.000 times `10u32`:
+```
+CVec:           5 kb
+Vec<u32>:       39.1 kb
+```
+
+9.000.000 times `10u32`:
+```
+CVec:           4.3MB
+Vec<u32>:       34.3MB
+```
+
+<br>
+As you can see the compression ratio is dependent on the size of the numbers. Storing 1000x 100u32 will always be smaller than 1000x 10000u32.
+This means this library scales perfectly well for lots of smaller numbers which can't be stored as u8 or u16. <br>
+In worst case a `CVec` holds `(len() / 256) * 9` bytes more than a `Vec<u32>`, which is very unlikely, unless you're only storing values which are around `u32::MAX` in value.
