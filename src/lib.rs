@@ -1,19 +1,25 @@
+//! A simple crate which provides a compressed List of u32 values. The level of compression is
+//! dependent on the size of the pushed numbers and can be up to 32 times in size which is the case
+//! for bit sequences.
+
+/// Contains a ro-wrapper around `CVec` that caches read blocks for faster sequencial (or nearby)
+/// access to the `CVec` values.
 pub mod buffered;
+/// Contains iterator implementations for `CVec`
 pub mod iter;
-pub mod traits;
+mod traits;
 
 use bitpacking::{BitPacker, BitPacker8x};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use iter::CVecIterRef;
 use std::{
     cmp::min,
-    io::{Cursor, Read, Write},
+    io::{self, Cursor, Read, Write},
     mem::size_of,
 };
-use traits::{Compress, Decompress};
 
-/// A compressed Vec<u32> which can be compress up to 4 times in size. The level of compression
-/// depends on the actual value of each number pushed on the cvec.
+/// A compressed `Vec<u32>` which can be compress up to 32 times in size. The level of compression
+/// depends on the bitsize of the biggest value within a 256block.
 #[derive(Clone, Debug)]
 pub struct CVec {
     /// The compressed Data
@@ -24,7 +30,7 @@ pub struct CVec {
 }
 
 impl CVec {
-    /// Allocate a new Compressed vector
+    /// Constructs a new, empty `CVec`
     #[inline]
     pub fn new() -> Self {
         Self {
@@ -34,14 +40,12 @@ impl CVec {
     }
 
     /// Allocate a new compressed vector which can store `capacity` numbers without reallocating
-    #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         let req_blocks = Self::req_block_count(capacity);
-        let mut data = Vec::with_capacity(req_blocks);
 
-        for _ in 0..req_blocks {
-            data.push((0, Vec::with_capacity(256)));
-        }
+        let data = (0..req_blocks)
+            .map(|_| (0, Vec::with_capacity(256)))
+            .collect();
 
         Self { data, items: 0 }
     }
@@ -68,23 +72,23 @@ impl CVec {
         self.items
     }
 
-    /// Returns the number of numbers the vector can hold without reallocating
-    #[inline]
-    pub fn capacity(&self) -> usize {
-        self.data.len() * 256
-    }
-
     /// Returns true if the vector is empty
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
+    /// Returns the number of numbers the vector can hold without reallocating
+    #[inline]
+    pub fn capacity(&self) -> usize {
+        self.data.len() * 256
+    }
+
     /// Pushes a new value on top of the vector
     pub fn push(&mut self, val: u32) {
         if self.data.is_empty() || self.need_new_block() {
             let mut new_block = Vec::with_capacity(256);
-            let num_bits = Self::compress_block(vec![val], &mut new_block);
+            let num_bits = Self::compress(vec![val], &mut new_block);
             self.data.push((num_bits, new_block));
         } else {
             let block_nr = self.last_block();
@@ -96,10 +100,11 @@ impl CVec {
             // Set value at position
             block[self.items % 256] = val;
 
+            // If get_mut would return None, the if block was executed.
             let mut out_block = self.data.get_mut(block_nr).unwrap();
 
             // Compress block again
-            let bit_size = Self::compress_block(block, &mut out_block.1);
+            let bit_size = Self::compress(block, &mut out_block.1);
             out_block.0 = bit_size;
         }
 
@@ -107,7 +112,7 @@ impl CVec {
     }
 
     /// Reads all values from `iter` and pushes them onto the vector. This should be preferred over
-    /// `push` if you have more than one value you want to add.
+    /// `push` if you have more than one value to append.
     pub fn extend<T: ExactSizeIterator<Item = u32>>(&mut self, mut iter: T) {
         // TODO don't use exact sized iterator
         let items = iter.len();
@@ -138,7 +143,7 @@ impl CVec {
 
             // Compress block again
             let mut out_block = self.data.get_mut(last_block_idx).unwrap();
-            let bit_size = Self::compress_block(block, &mut out_block.1);
+            let bit_size = Self::compress(block, &mut out_block.1);
             out_block.0 = bit_size;
             self.items += to_fill;
         }
@@ -152,8 +157,7 @@ impl CVec {
 
             for nb_pos in 0..blocks_needed {
                 let block_data_raw = iter.by_ref().take(256).collect();
-                new_blocks[nb_pos].0 =
-                    Self::compress_block(block_data_raw, &mut new_blocks[nb_pos].1);
+                new_blocks[nb_pos].0 = Self::compress(block_data_raw, &mut new_blocks[nb_pos].1);
             }
 
             self.data.extend(new_blocks);
@@ -168,10 +172,11 @@ impl CVec {
             return None;
         }
 
-        let popped = self.last()?;
+        let popped = self.last_unchecked()?;
 
         self.items -= 1;
 
+        // Remove last allocated block if it gets empty
         if self.items % 256 == 0 {
             let block_nr = self.last_block();
             self.data.remove(block_nr);
@@ -187,7 +192,7 @@ impl CVec {
             return None;
         }
 
-        self.get(self.len() - 1)
+        self.last_unchecked()
     }
 
     /// Returns the u32 at `pos`
@@ -198,7 +203,6 @@ impl CVec {
         }
 
         let mut decompressed = vec![0u32; BitPacker8x::BLOCK_LEN];
-
         self.decompress_block(Self::pos_block(pos), &mut decompressed)?;
         decompressed.get(Self::pos_in_block(pos)).map(|i| *i)
     }
@@ -207,6 +211,12 @@ impl CVec {
     #[inline]
     pub fn iter<'a>(&'a self) -> CVecIterRef<'a> {
         CVecIterRef::new(self)
+    }
+
+    /// Returns the data hold by CVec decompressed as `Vec::<u32>`
+    #[inline]
+    pub fn as_vec(&self) -> Vec<u32> {
+        Vec::from(self)
     }
 
     /// Returns the block `pos` is stored in
@@ -243,6 +253,13 @@ impl CVec {
         }
     }
 
+    /// Returns the last number in the vector. `None` if `self.len() == 0` without doing safety
+    /// checks.
+    #[inline]
+    fn last_unchecked(&self) -> Option<u32> {
+        self.get(self.len() - 1)
+    }
+
     /// Returns a Vec of bytes representing the Vector. This can be used to store it in a file or
     /// send it over the network
     pub fn as_bytes(&self) -> Vec<u8> {
@@ -262,7 +279,7 @@ impl CVec {
     }
 
     /// Creates a new `CVec` from raw bytes. This can be used together with `as_bytes`.
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, std::io::Error> {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, io::Error> {
         let mut reader = Cursor::new(bytes);
 
         let mut new = Self::new();
@@ -282,15 +299,38 @@ impl CVec {
 
         Ok(new)
     }
-}
 
-impl Compress for CVec {
+    /// Decodes a byte sequence created by `as_bytes`, directly decompresses the integers and
+    /// stores them in a new `Vec<32>` which gets returned.
+    pub fn bytes_to_vec(bytes: &[u8]) -> Result<Vec<u32>, io::Error> {
+        let mut reader = Cursor::new(bytes);
+
+        let size = reader.read_u64::<LittleEndian>()? as usize;
+
+        let mut new_vec = Vec::with_capacity(size);
+
+        let blocks = reader.read_u32::<LittleEndian>()?;
+
+        let mut buf = Vec::with_capacity(256);
+        for _ in 0..blocks {
+            let num_bits = reader.read_u8()?;
+            let block_size = num_bits as usize * 32;
+
+            let mut block = vec![0u8; block_size];
+            reader.read_exact(&mut block)?;
+
+            Self::decompress(&block, num_bits, &mut buf);
+            new_vec.extend(buf.iter().take(size - new_vec.len()).copied());
+        }
+
+        Ok(new_vec)
+    }
+
     /// Compresses a Vec<u32>
     ///
     /// # Panics
     /// Panics if data.len() > 256
-    #[inline]
-    fn compress_block(mut data: Vec<u32>, out: &mut Vec<u8>) -> u8 {
+    fn compress(mut data: Vec<u32>, out: &mut Vec<u8>) -> u8 {
         assert!(data.len() <= 256);
 
         if data.len() < 256 {
@@ -306,25 +346,34 @@ impl Compress for CVec {
         bitpacker.compress(&data, out, num_bits);
         num_bits
     }
-}
 
-impl Decompress for CVec {
     /// Decompress a given block at `index`
     ///
     /// Returns `None` if there is no such block.
     #[inline]
     fn decompress_block(&self, index: usize, out: &mut Vec<u32>) -> Option<()> {
+        let (num_bits, block) = self.data.get(index)?;
+        Self::decompress(block, *num_bits, out);
+        Some(())
+    }
+
+    /// Decompresses `data` and writes them to `out`. If `out` has an invalid size, it gets padded
+    /// with 0s.
+    ///
+    /// # Panics
+    /// panics if `data` is too short
+    fn decompress(data: &[u8], num_bits: u8, out: &mut Vec<u32>) {
         let bitpacker = BitPacker8x::new();
 
-        let (num_bits, block) = self.data.get(index)?;
-
-        if out.len() != BitPacker8x::BLOCK_LEN {
+        if out.len() < BitPacker8x::BLOCK_LEN {
             out.resize(BitPacker8x::BLOCK_LEN, 0);
         }
 
-        let compressed_len = (*num_bits as usize) * BitPacker8x::BLOCK_LEN / 8;
-        bitpacker.decompress(&block[..compressed_len], out, *num_bits);
-
-        Some(())
+        let compressed_len = (num_bits as usize) * BitPacker8x::BLOCK_LEN / 8;
+        bitpacker.decompress(
+            &data[..compressed_len],
+            &mut out[0..BitPacker8x::BLOCK_LEN],
+            num_bits,
+        );
     }
 }

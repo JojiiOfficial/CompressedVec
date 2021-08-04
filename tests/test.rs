@@ -236,3 +236,12 @@ fn extend_test(a_len: usize, b_len: usize) {
         assert_eq!(expected, real);
     }
 }
+
+#[test]
+fn bytes_to_vec() {
+    let data = (0..100).collect::<Vec<_>>();
+    let cvec: CVec = data.clone().into();
+    let bytes = cvec.as_bytes();
+    let byte_vec = CVec::bytes_to_vec(&bytes).unwrap();
+    assert_eq!(byte_vec, data);
+}

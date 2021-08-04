@@ -5,7 +5,7 @@ use crate::{
     CVec,
 };
 
-/// Helper type to iterate a borrowed CVec
+/// `Iterator` implementing type to iterate over a `&CVec`
 pub struct CVecIterRef<'a> {
     vec: BufCVecRef<'a>,
     pos: usize,
@@ -34,7 +34,7 @@ impl<'a> Iterator for CVecIterRef<'a> {
     }
 }
 
-/// Helper type to iterate a CVec
+/// `Iterator` implementing type to iterate over a `CVec`
 pub struct CVecIter {
     vec: BufCVec,
     pos: usize,
@@ -73,13 +73,6 @@ impl FromIterator<u32> for CVec {
         let mut new = CVec::new();
         new.extend(iter.into_iter().collect::<Vec<_>>().into_iter());
         new
-    }
-}
-
-impl<T: AsRef<u32>> From<Vec<T>> for CVec {
-    #[inline]
-    fn from(vec: Vec<T>) -> Self {
-        vec.into_iter().map(|i| *i.as_ref()).collect::<Self>()
     }
 }
 

@@ -1,13 +1,5 @@
 use crate::CVec;
 
-pub(crate) trait Compress {
-    fn compress_block(data: Vec<u32>, out: &mut Vec<u8>) -> u8;
-}
-
-pub(crate) trait Decompress {
-    fn decompress_block(&self, index: usize, out: &mut Vec<u32>) -> Option<()>;
-}
-
 impl<T: AsRef<[u32]>> PartialEq<T> for CVec {
     #[inline]
     fn eq(&self, other: &T) -> bool {
@@ -40,5 +32,33 @@ impl PartialEq<CVec> for &[u32] {
     #[inline]
     fn eq(&self, other: &CVec) -> bool {
         other.iter().eq(self.iter().copied())
+    }
+}
+
+impl From<&CVec> for Vec<u32> {
+    #[inline]
+    fn from(cvec: &CVec) -> Self {
+        cvec.iter().collect()
+    }
+}
+
+impl From<CVec> for Vec<u32> {
+    #[inline]
+    fn from(cvec: CVec) -> Self {
+        cvec.into_iter().collect::<Vec<u32>>()
+    }
+}
+
+impl From<&Vec<u32>> for CVec {
+    #[inline]
+    fn from(vec: &Vec<u32>) -> Self {
+        vec.iter().copied().collect::<Self>()
+    }
+}
+
+impl From<Vec<u32>> for CVec {
+    #[inline]
+    fn from(vec: Vec<u32>) -> Self {
+        vec.into_iter().collect::<Self>()
     }
 }

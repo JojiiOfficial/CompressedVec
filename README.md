@@ -37,6 +37,9 @@ fn main(){
   // Returns the amount of bytes used to store the vectors data (compressed)
   cvec.byte_len()
 
+  // Convert raw bytes directly to a Vec<u32>
+  CVec::bytes_to_vec
+
 
   // Note: for sequencial iterating you should use a `BufCVec` or a `BufCVecRef`. This is much more efficient than iterating over `cvec.get(pos)`
   let mut buffered = BufCVecRef::from(&cvec);

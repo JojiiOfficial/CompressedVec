@@ -1,4 +1,4 @@
-use crate::{traits::Decompress, CVec};
+use crate::CVec;
 use bitpacking::{BitPacker, BitPacker8x};
 use std::mem;
 
