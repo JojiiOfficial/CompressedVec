@@ -205,3 +205,34 @@ fn type_conversion_vec() {
 
     assert_eq!(vec, data.collect::<Vec<_>>());
 }
+
+#[test]
+fn extend() {
+    for i in (0..577).into_iter().step_by(64) {
+        for j in (0..577).into_iter().step_by(64) {
+            extend_test(i, j);
+        }
+    }
+}
+
+fn extend_test(a_len: usize, b_len: usize) {
+    let cvec_a = (0..a_len as u32).collect::<CVec>();
+    let cvec_b = (0..b_len as u32).collect::<CVec>();
+
+    let vec_a = (0..a_len as u32).collect::<Vec<_>>();
+    let vec_b = (0..b_len as u32).collect::<Vec<_>>();
+
+    let mut new_vec = cvec_a;
+    new_vec.extend(cvec_b.into_iter());
+
+    let real_vec = vec_a
+        .into_iter()
+        .chain(vec_b.into_iter())
+        .collect::<Vec<_>>();
+
+    for i in 0..real_vec.len() {
+        let expected = new_vec.get(i);
+        let real = real_vec.get(i).map(|i| *i);
+        assert_eq!(expected, real);
+    }
+}

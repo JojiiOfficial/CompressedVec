@@ -33,6 +33,7 @@ pub trait BufferedCVec {
         let block_index = CVec::pos_block(index);
 
         let buf_block = self.get_buf_block();
+
         if buf_block.is_none() || buf_block.unwrap() != block_index {
             // Set cache
 

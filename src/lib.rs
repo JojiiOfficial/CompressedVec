@@ -6,6 +6,7 @@ use bitpacking::{BitPacker, BitPacker8x};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use iter::CVecIterRef;
 use std::{
+    cmp::min,
     io::{Cursor, Read, Write},
     mem::size_of,
 };
@@ -103,6 +104,61 @@ impl CVec {
         }
 
         self.items += 1;
+    }
+
+    /// Reads all values from `iter` and pushes them onto the vector. This should be preferred over
+    /// `push` if you have more than one value you want to add.
+    pub fn extend<T: ExactSizeIterator<Item = u32>>(&mut self, mut iter: T) {
+        // TODO don't use exact sized iterator
+        let items = iter.len();
+        if items == 0 {
+            return;
+        }
+
+        // How many items were pushed
+        let mut pushed: usize = 0;
+
+        // Fill last block
+        if !self.need_new_block() {
+            let last_block_idx = self.last_block();
+
+            let free_slots = 256 - (self.items % 256);
+            let to_fill = min(free_slots, items);
+
+            // decompress last block
+            let mut block = vec![0u32; BitPacker8x::BLOCK_LEN];
+            self.decompress_block(last_block_idx, &mut block).unwrap();
+
+            // Set all values
+            let start = self.items % 256;
+            for i in start..start + to_fill {
+                block[i] = iter.next().unwrap();
+                pushed += 1;
+            }
+
+            // Compress block again
+            let mut out_block = self.data.get_mut(last_block_idx).unwrap();
+            let bit_size = Self::compress_block(block, &mut out_block.1);
+            out_block.0 = bit_size;
+            self.items += to_fill;
+        }
+
+        // For the rest (if available) we're allocating new blocks which we fill and add
+        if items > pushed {
+            let to_push_left = items - pushed;
+            let mut new_blocks = vec![(0u8, Vec::<u8>::new()); (to_push_left / 256) + 1];
+
+            for nb_pos in 0..(to_push_left / 256) + 1 {
+                let num_bits = Self::compress_block(
+                    iter.by_ref().take(256).collect(),
+                    &mut new_blocks[nb_pos].1,
+                );
+                new_blocks[nb_pos].0 = num_bits;
+            }
+
+            self.data.extend(new_blocks);
+            self.items += to_push_left;
+        }
     }
 
     /// Pops the last element from the vector. Returns `None` if vector is empty or Some(val)
