@@ -3,7 +3,7 @@ use std::time::Instant;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 fn push_bench(c: &mut Criterion) {
-    c.bench_function("push", |b| {
+    c.bench_function("std push", |b| {
         b.iter_custom(|iters| {
             let mut vec = Vec::<u32>::new();
 
@@ -19,7 +19,7 @@ fn push_bench(c: &mut Criterion) {
 }
 
 fn extend_many(c: &mut Criterion) {
-    c.bench_function("extend 10k", |b| {
+    c.bench_function("std extend 10k", |b| {
         b.iter_custom(|iters| {
             let to_add = (0..10000).collect::<Vec<u32>>();
             let mut vec = Vec::<u32>::new();
@@ -36,7 +36,7 @@ fn extend_many(c: &mut Criterion) {
 }
 
 fn extend_some(c: &mut Criterion) {
-    c.bench_function("extend 100", |b| {
+    c.bench_function("std extend 100", |b| {
         b.iter_custom(|iters| {
             let to_add = (0..100).collect::<Vec<u32>>();
             let mut vec = Vec::<u32>::new();
@@ -53,7 +53,7 @@ fn extend_some(c: &mut Criterion) {
 }
 
 fn get_seq(c: &mut Criterion) {
-    c.bench_function("get() seq.", |b| {
+    c.bench_function("std get() seq.", |b| {
         b.iter_custom(|iters| {
             let vec = (0..iters as u32).collect::<Vec<u32>>();
 
@@ -69,7 +69,7 @@ fn get_seq(c: &mut Criterion) {
 }
 
 fn get_rand(c: &mut Criterion) {
-    c.bench_function("get() random", |b| {
+    c.bench_function("std get() random", |b| {
         b.iter_custom(|iters| {
             let vec = (0..iters as u32).collect::<Vec<u32>>();
 
@@ -85,7 +85,7 @@ fn get_rand(c: &mut Criterion) {
 }
 
 fn pop(c: &mut Criterion) {
-    c.bench_function("pop", |b| {
+    c.bench_function("std pop", |b| {
         b.iter_custom(|iters| {
             let mut vec = (0..iters as u32).collect::<Vec<u32>>();
 

@@ -7,7 +7,7 @@ use compressed_vec::{
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 fn push_bench(c: &mut Criterion) {
-    c.bench_function("push", |b| {
+    c.bench_function("cvec push", |b| {
         b.iter_custom(|iters| {
             let mut vec = CVec::new();
 
@@ -23,7 +23,7 @@ fn push_bench(c: &mut Criterion) {
 }
 
 fn extend_many(c: &mut Criterion) {
-    c.bench_function("extend 10k", |b| {
+    c.bench_function("cvec extend 10k", |b| {
         b.iter_custom(|iters| {
             let to_add = (0..10000).collect::<CVec>();
             let mut vec = CVec::new();
@@ -40,7 +40,7 @@ fn extend_many(c: &mut Criterion) {
 }
 
 fn extend_some(c: &mut Criterion) {
-    c.bench_function("extend 100", |b| {
+    c.bench_function("cvec extend 100", |b| {
         b.iter_custom(|iters| {
             let to_add = (0..100).collect::<CVec>();
             let mut vec = CVec::new();
@@ -57,7 +57,7 @@ fn extend_some(c: &mut Criterion) {
 }
 
 fn get_rand(c: &mut Criterion) {
-    c.bench_function("get() random", |b| {
+    c.bench_function("cvec get() random", |b| {
         b.iter_custom(|iters| {
             let vec = (0..iters as u32).collect::<CVec>();
 
@@ -73,7 +73,7 @@ fn get_rand(c: &mut Criterion) {
 }
 
 fn get_seq(c: &mut Criterion) {
-    c.bench_function("get() seq.", |b| {
+    c.bench_function("cvec get() seq.", |b| {
         b.iter_custom(|iters| {
             let vec = (0..iters as u32).collect::<CVec>();
 
@@ -89,7 +89,7 @@ fn get_seq(c: &mut Criterion) {
 }
 
 fn get_seq_buf(c: &mut Criterion) {
-    c.bench_function("get() seq. buffered", |b| {
+    c.bench_function("cvec get() seq. buffered", |b| {
         b.iter_custom(|iters| {
             let vec = (0..iters as u32).collect::<CVec>();
             let mut vec: BufCVec = vec.into();
@@ -106,7 +106,7 @@ fn get_seq_buf(c: &mut Criterion) {
 }
 
 fn pop(c: &mut Criterion) {
-    c.bench_function("pop", |b| {
+    c.bench_function("cvec pop", |b| {
         b.iter_custom(|iters| {
             let mut vec = (0..iters as u32).collect::<CVec>();
 

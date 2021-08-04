@@ -7,13 +7,12 @@
 pub mod buffered;
 /// Contains iterator implementations for `CVec`
 pub mod iter;
-mod traits;
+pub mod traits;
 
 use bitpacking::{BitPacker, BitPacker8x};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use iter::CVecIterRef;
+use iter::{CVecIterRef, Chunkable};
 use std::{
-    cmp::min,
     io::{self, Cursor, Read, Write},
     mem::size_of,
 };
@@ -109,60 +108,6 @@ impl CVec {
         }
 
         self.items += 1;
-    }
-
-    /// Reads all values from `iter` and pushes them onto the vector. This should be preferred over
-    /// `push` if you have more than one value to append.
-    pub fn extend<T: ExactSizeIterator<Item = u32>>(&mut self, mut iter: T) {
-        // TODO don't use exact sized iterator
-        let items = iter.len();
-        if items == 0 {
-            return;
-        }
-
-        // How many items were pushed
-        let mut pushed: usize = 0;
-
-        // Fill last block
-        if !self.need_new_block() {
-            let last_block_idx = self.last_block();
-
-            let free_slots = 256 - (self.items % 256);
-            let to_fill = min(free_slots, items);
-
-            // decompress last block
-            let mut block = vec![0u32; BitPacker8x::BLOCK_LEN];
-            self.decompress_block(last_block_idx, &mut block).unwrap();
-
-            // Set all values
-            let start = self.items % 256;
-            for i in start..start + to_fill {
-                block[i] = iter.next().unwrap();
-                pushed += 1;
-            }
-
-            // Compress block again
-            let mut out_block = self.data.get_mut(last_block_idx).unwrap();
-            let bit_size = Self::compress(block, &mut out_block.1);
-            out_block.0 = bit_size;
-            self.items += to_fill;
-        }
-
-        // For the rest (if available) we're allocating new blocks which we fill and add
-        if items > pushed {
-            let to_push_left = items - pushed;
-
-            let blocks_needed = (to_push_left / 256) + 1;
-            let mut new_blocks = vec![(0u8, Vec::<u8>::new()); blocks_needed];
-
-            for nb_pos in 0..blocks_needed {
-                let block_data_raw = iter.by_ref().take(256).collect();
-                new_blocks[nb_pos].0 = Self::compress(block_data_raw, &mut new_blocks[nb_pos].1);
-            }
-
-            self.data.extend(new_blocks);
-            self.items += to_push_left;
-        }
     }
 
     /// Pops the last element from the vector. Returns `None` if vector is empty or Some(val)
@@ -375,5 +320,51 @@ impl CVec {
             &mut out[0..BitPacker8x::BLOCK_LEN],
             num_bits,
         );
+    }
+}
+
+impl Extend<u32> for CVec {
+    /// Reads all values from `iter` and pushes them onto the vector. This should be preferred over
+    /// `push` if you have more than one value to append.
+    fn extend<T: IntoIterator<Item = u32>>(&mut self, iter: T) {
+        let mut iter = iter.into_iter();
+
+        // How many items were pushed
+        let mut pushed: usize = 0;
+
+        // Fill last block
+        if !self.need_new_block() {
+            let last_block_idx = self.last_block();
+
+            let free_slots = 256 - (self.items % 256);
+            let to_fill = free_slots;
+
+            // decompress last block
+            let mut block = vec![0u32; BitPacker8x::BLOCK_LEN];
+            self.decompress_block(last_block_idx, &mut block).unwrap();
+
+            // Set all values
+            let start = self.items % 256;
+            for i in start..start + to_fill {
+                block[i] = match iter.next() {
+                    Some(s) => s,
+                    None => break,
+                };
+                pushed += 1;
+            }
+
+            // Compress block again
+            let mut out_block = self.data.get_mut(last_block_idx).unwrap();
+            let bit_size = Self::compress(block, &mut out_block.1);
+            out_block.0 = bit_size;
+            self.items += pushed;
+        }
+
+        let mut block = Vec::new();
+        for to_add in iter.by_ref().chunked(256) {
+            self.items += to_add.len();
+            let num_bits = Self::compress(to_add, &mut block);
+            self.data.push((num_bits, block.clone()));
+        }
     }
 }
