@@ -122,7 +122,7 @@ impl CVec {
     /// Returns the u32 at `pos`
     #[inline]
     pub fn get(&self, pos: usize) -> Option<u32> {
-        if pos > self.items {
+        if pos >= self.items {
             return None;
         }
         self.decompress_block(pos / 256)?.get(pos % 256).map(|i| *i)
