@@ -1,7 +1,13 @@
 [package]
 name = "compressed_vec"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2018"
+description = "A library providing a compressed Vec<u32>"
+authors = ["jojii <jojii@gmx.net>"]
+license = "GPL-3.0"
+repository = "https://github.com/JojiiOfficial/CompressedVec"
+keywords = ["compression","bitpacking"]
+
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
