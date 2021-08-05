@@ -14,6 +14,7 @@ keywords = ["compression","bitpacking"]
 [dependencies]
 bitpacking = "0.8.4"
 byteorder = "1.4.3"
+utilsrs = { git = "https://github.com/JojiiOfficial/utilsrs", features = ["itertools"]}
 
 [dev-dependencies]
 criterion = "0.3.5"

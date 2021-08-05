@@ -11,11 +11,12 @@ pub mod traits;
 
 use bitpacking::{BitPacker, BitPacker8x};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use iter::{CVecIterRef, Chunkable};
+use iter::CVecIterRef;
 use std::{
     io::{self, Cursor, Read, Write},
     mem::size_of,
 };
+use utilsrs::itertools::IterExt;
 
 /// A compressed `Vec<u32>` which can be compress up to 32 times in size. The level of compression
 /// depends on the bitsize of the biggest value within a 256block.
@@ -85,7 +86,7 @@ impl CVec {
 
     /// Pushes a new value on top of the vector
     pub fn push(&mut self, val: u32) {
-        if self.data.is_empty() || self.need_new_block() {
+        if self.need_new_block() {
             let mut new_block = Vec::with_capacity(256);
             let num_bits = Self::compress(vec![val], &mut new_block);
             self.data.push((num_bits, new_block));
