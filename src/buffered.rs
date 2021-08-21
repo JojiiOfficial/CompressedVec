@@ -5,45 +5,52 @@ use std::mem;
 /// A trait defining functionality for buffered reading of a collection. This reduces en/decode
 /// operations on a CVec value
 pub trait BufferedCVec {
-    /// Should return the buffer to use
-    fn get_buffer(&self) -> &Vec<u32>;
-
-    /// Should return the buffer to use mutable
-    fn get_buffer_mut(&mut self) -> &mut Vec<u32>;
-
-    /// Should set the buffer to `data`
-    fn set_bufffer(&mut self, data: Vec<u32>);
-
-    /// Should return the block index of the block stored in buffer
-    fn get_buf_block(&self) -> Option<usize>;
-
-    /// Should set the block index of the block stored in buffer
-    fn set_buf_block(&mut self, pos: usize);
+    fn get_buffer(&mut self) -> &mut Buffer;
 
     /// Should return the CVec reference
     fn get_vec(&self) -> &CVec;
 
     /// Like CVec::get() but returns a reference to the u32 and uses a cache if available
+    fn get_buffered(&mut self, index: usize) -> Option<&u32>;
+}
+
+/// A buffer for reading a [`CVec`] sequencially efficiently.
+#[derive(Debug, Clone)]
+pub struct Buffer {
+    data: Vec<u32>,
+    buf_block: Option<usize>,
+}
+
+impl Buffer {
+    /// Create a new buffer with empty data preallocated
     #[inline]
-    fn get_buffered(&mut self, index: usize) -> Option<&u32> {
-        if index >= self.get_vec().len() {
+    pub fn new() -> Self {
+        Self {
+            data: vec![],
+            //data: vec![0u32; BitPacker8x::BLOCK_LEN],
+            buf_block: None,
+        }
+    }
+
+    pub fn read_buffered(&mut self, vec: &CVec, index: usize) -> Option<&u32> {
+        if index >= vec.len() {
             return None;
         }
 
         let block_index = CVec::pos_block(index);
 
-        let buf_block = self.get_buf_block();
-
-        if buf_block.is_none() || buf_block.unwrap() != block_index {
+        if self.buf_block.is_none() || *self.buf_block.as_ref().unwrap() != block_index {
             // Set cache
-
-            let mut buff = mem::take(self.get_buffer_mut());
-            self.get_vec().decompress_block(block_index, &mut buff);
-            self.set_bufffer(buff);
-            self.set_buf_block(block_index);
+            let mut buff = mem::take(&mut self.data);
+            if self.data.len() < BitPacker8x::BLOCK_LEN {
+                self.data.resize(BitPacker8x::BLOCK_LEN, 0);
+            }
+            vec.decompress_block(block_index, &mut buff);
+            self.data = buff;
+            self.buf_block = Some(block_index);
         }
 
-        self.get_buffer().get(CVec::pos_in_block(index))
+        self.data.get(CVec::pos_in_block(index))
     }
 }
 
@@ -51,8 +58,7 @@ pub trait BufferedCVec {
 #[derive(Debug, Clone)]
 pub struct BufCVec {
     vec: CVec,
-    buf: Vec<u32>,
-    buf_block: Option<usize>,
+    buf: Buffer,
 }
 
 impl BufCVec {
@@ -61,9 +67,14 @@ impl BufCVec {
     pub fn new(vec: CVec) -> Self {
         Self {
             vec,
-            buf: vec![0u32; BitPacker8x::BLOCK_LEN],
-            buf_block: None,
+            buf: Buffer::new(),
         }
+    }
+
+    /// Read from a `BufCVec`
+    #[inline]
+    pub fn get_buffered(&mut self, index: usize) -> Option<&u32> {
+        self.buf.read_buffered(&self.vec, index)
     }
 }
 
@@ -78,8 +89,7 @@ impl From<CVec> for BufCVec {
 #[derive(Debug, Clone)]
 pub struct BufCVecRef<'a> {
     vec: &'a CVec,
-    buf: Vec<u32>,
-    buf_block: Option<usize>,
+    buf: Buffer,
 }
 
 impl<'a> From<&'a CVec> for BufCVecRef<'a> {
@@ -95,31 +105,20 @@ impl<'a> BufCVecRef<'a> {
     pub fn new(vec: &'a CVec) -> Self {
         Self {
             vec,
-            buf: vec![0u32; BitPacker8x::BLOCK_LEN],
-            buf_block: None,
+            buf: Buffer::new(),
         }
+    }
+
+    #[inline]
+    pub fn get_buffered(&mut self, index: usize) -> Option<&u32> {
+        self.buf.read_buffered(&self.vec, index)
     }
 }
 
 impl BufferedCVec for BufCVec {
     #[inline]
-    fn get_buffer(&self) -> &Vec<u32> {
-        &self.buf
-    }
-
-    #[inline]
-    fn set_bufffer(&mut self, data: Vec<u32>) {
-        self.buf = data;
-    }
-
-    #[inline]
-    fn get_buf_block(&self) -> Option<usize> {
-        self.buf_block
-    }
-
-    #[inline]
-    fn set_buf_block(&mut self, buf_block: usize) {
-        self.buf_block = Some(buf_block);
+    fn get_buffer(&mut self) -> &mut Buffer {
+        &mut self.buf
     }
 
     #[inline]
@@ -128,30 +127,15 @@ impl BufferedCVec for BufCVec {
     }
 
     #[inline]
-    fn get_buffer_mut(&mut self) -> &mut Vec<u32> {
-        &mut self.buf
+    fn get_buffered(&mut self, index: usize) -> Option<&u32> {
+        self.get_buffered(index)
     }
 }
 
 impl<'a> BufferedCVec for BufCVecRef<'a> {
     #[inline]
-    fn get_buffer(&self) -> &Vec<u32> {
-        &self.buf
-    }
-
-    #[inline]
-    fn set_bufffer(&mut self, data: Vec<u32>) {
-        self.buf = data;
-    }
-
-    #[inline]
-    fn get_buf_block(&self) -> Option<usize> {
-        self.buf_block
-    }
-
-    #[inline]
-    fn set_buf_block(&mut self, buf_block: usize) {
-        self.buf_block = Some(buf_block);
+    fn get_buffer(&mut self) -> &mut Buffer {
+        &mut self.buf
     }
 
     #[inline]
@@ -160,7 +144,7 @@ impl<'a> BufferedCVec for BufCVecRef<'a> {
     }
 
     #[inline]
-    fn get_buffer_mut(&mut self) -> &mut Vec<u32> {
-        &mut self.buf
+    fn get_buffered(&mut self, index: usize) -> Option<&u32> {
+        self.get_buffered(index)
     }
 }

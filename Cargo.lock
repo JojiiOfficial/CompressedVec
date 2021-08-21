@@ -519,6 +519,7 @@ checksum = "8ccb82d61f80a663efe1f787a51b16b5a51e3314d6ac365b08639f52387b33f3"
 [[package]]
 name = "utilsrs"
 version = "0.1.0"
+source = "git+https://github.com/JojiiOfficial/utilsrs#b0b019f328216bae7ad55faba599eb266cdc4001"
 
 [[package]]
 name = "walkdir"

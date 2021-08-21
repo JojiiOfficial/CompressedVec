@@ -9,6 +9,8 @@ pub mod buffered;
 pub mod iter;
 pub mod traits;
 
+pub use buffered::Buffer;
+
 use bitpacking::{BitPacker, BitPacker8x};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use iter::CVecIterRef;

@@ -1,7 +1,7 @@
 use std::iter::FromIterator;
 
 use crate::{
-    buffered::{BufCVec, BufCVecRef, BufferedCVec},
+    buffered::{BufCVec, BufCVecRef},
     CVec,
 };
 
