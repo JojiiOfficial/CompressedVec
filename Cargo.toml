@@ -6,7 +6,7 @@ description = "A library providing a compressed Vec<u32>"
 authors = ["jojii <jojii@gmx.net>"]
 license = "GPL-3.0"
 repository = "https://github.com/JojiiOfficial/CompressedVec"
-keywords = ["compression","bitpacking"]
+keywords = ["compression", "bitpacking"]
 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -14,7 +14,10 @@ keywords = ["compression","bitpacking"]
 [dependencies]
 bitpacking = "0.8.4"
 byteorder = "1.4.3"
-utilsrs = { git = "https://github.com/JojiiOfficial/utilsrs", features = ["itertools"]}
+utilsrs = { git = "https://github.com/JojiiOfficial/utilsrs", features = [
+  "itertools",
+] }
+serde = { version = "*", features = ["derive"] }
 
 [dev-dependencies]
 criterion = "0.3.5"

@@ -14,6 +14,7 @@ pub use buffered::Buffer;
 use bitpacking::{BitPacker, BitPacker8x};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use iter::CVecIterRef;
+use serde::{Deserialize, Serialize};
 use std::{
     io::{self, Cursor, Read, Write},
     mem::size_of,
@@ -22,7 +23,7 @@ use utilsrs::itertools::IterExt;
 
 /// A compressed `Vec<u32>` which can be compress up to 32 times in size. The level of compression
 /// depends on the bitsize of the biggest value within a 256block.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CVec {
     /// The compressed Data
     data: Vec<(u8, Vec<u8>)>,
