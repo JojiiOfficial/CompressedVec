@@ -18,6 +18,34 @@ fn push_with_capacity() {
 }
 
 #[test]
+fn test_set() {
+    let mut cvec = (0..9000).collect::<CVec>();
+
+    for i in 0..9000u32 {
+        let res = cvec.get(i as usize);
+        assert_eq!(res, Some(i));
+    }
+
+    cvec.set(0, 100);
+    //cvec[0] = 100;
+    assert_eq!(cvec.get(0), Some(100));
+    for i in 1..9000u32 {
+        let res = cvec.get(i as usize);
+        assert_eq!(res, Some(i));
+    }
+
+    for i in 0..1000u32 {
+        let res = cvec.set(i as usize, i + 1);
+        assert!(res.is_some());
+    }
+
+    for i in 0..1000u32 {
+        let res = cvec.get(i as usize);
+        assert_eq!(res, Some(i + 1));
+    }
+}
+
+#[test]
 fn pop_with_capacity() {
     let mut v = CVec::with_capacity(1000);
     let mut rv = Vec::new();
@@ -122,20 +150,6 @@ fn capacity() {
 }
 
 #[test]
-fn encoding() {
-    let mut v = CVec::new();
-    let test_data = (0..9999).collect::<Vec<_>>();
-    for i in test_data.iter() {
-        v.push(*i);
-    }
-
-    let bytes = v.as_bytes();
-    let new = CVec::from_bytes(&bytes);
-    assert!(new.is_ok());
-    assert_eq!(new.unwrap(), v);
-}
-
-#[test]
 fn iterator() {
     let mut v = CVec::new();
     let test_data = (0..4).collect::<Vec<_>>();
@@ -235,13 +249,4 @@ fn extend_test(a_len: usize, b_len: usize) {
         let real = real_vec.get(i).map(|i| *i);
         assert_eq!(expected, real);
     }
-}
-
-#[test]
-fn bytes_to_vec() {
-    let data = (0..100).collect::<Vec<_>>();
-    let cvec: CVec = data.clone().into();
-    let bytes = cvec.as_bytes();
-    let byte_vec = CVec::bytes_to_vec(&bytes).unwrap();
-    assert_eq!(byte_vec, data);
 }

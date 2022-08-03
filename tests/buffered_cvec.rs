@@ -1,5 +1,5 @@
 use compressed_vec::{
-    buffered::{BufCVec, BufCVecRef, BufferedCVec},
+    buffered::{BufCVec, BufCVecRef},
     CVec,
 };
 

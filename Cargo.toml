@@ -13,14 +13,13 @@ keywords = ["compression", "bitpacking"]
 
 [dependencies]
 bitpacking = "0.8.4"
-byteorder = "1.4.3"
-utilsrs = { git = "https://github.com/JojiiOfficial/utilsrs", features = [
+utilsrs = { git = "https://github.com/JojiiOfficial/utilsrs", default-features = false, features = [
   "itertools",
 ] }
-serde = { version = "*", features = ["derive"] }
+serde = { version = "1.0.141", features = ["derive"] }
 
 [dev-dependencies]
-criterion = "0.3.5"
+criterion = "0.3.6"
 
 [[bench]]
 name = "bench1"

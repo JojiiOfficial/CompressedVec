@@ -12,13 +12,9 @@ pub mod traits;
 pub use buffered::Buffer;
 
 use bitpacking::{BitPacker, BitPacker8x};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use iter::CVecIterRef;
 use serde::{Deserialize, Serialize};
-use std::{
-    io::{self, Cursor, Read, Write},
-    mem::size_of,
-};
+use std::mem::size_of;
 use utilsrs::itertools::IterExt;
 
 /// A compressed `Vec<u32>` which can be compress up to 32 times in size. The level of compression
@@ -145,7 +141,6 @@ impl CVec {
     }
 
     /// Returns the u32 at `pos`
-    #[inline]
     pub fn get(&self, pos: usize) -> Option<u32> {
         if pos >= self.items {
             return None;
@@ -154,6 +149,24 @@ impl CVec {
         let mut decompressed = vec![0u32; BitPacker8x::BLOCK_LEN];
         self.decompress_block(Self::pos_block(pos), &mut decompressed)?;
         decompressed.get(Self::pos_in_block(pos)).map(|i| *i)
+    }
+
+    /// Returns the u32 at `pos`
+    pub fn set(&mut self, pos: usize, new: u32) -> Option<()> {
+        if pos >= self.items {
+            return None;
+        }
+
+        let mut decompressed = vec![0u32; BitPacker8x::BLOCK_LEN];
+        self.decompress_block(Self::pos_block(pos), &mut decompressed)?;
+        *decompressed.get_mut(Self::pos_in_block(pos))? = new;
+        let bit_size = Self::compress(
+            decompressed,
+            &mut self.data.get_mut(Self::pos_block(pos)).unwrap().1,
+        );
+        self.data.get_mut(Self::pos_block(pos)).unwrap().0 = bit_size;
+
+        Some(())
     }
 
     /// Returns an referenced iterator over the vector's elements
@@ -207,72 +220,6 @@ impl CVec {
     #[inline]
     fn last_unchecked(&self) -> Option<u32> {
         self.get(self.len() - 1)
-    }
-
-    /// Returns a Vec of bytes representing the Vector. This can be used to store it in a file or
-    /// send it over the network
-    pub fn as_bytes(&self) -> Vec<u8> {
-        let mut out = Vec::new();
-
-        out.write_u64::<LittleEndian>(self.items as u64).unwrap();
-        out.write_u32::<LittleEndian>(self.data.len() as u32)
-            .unwrap();
-
-        for (num_bits, block) in self.data.iter() {
-            let block_size = *num_bits as usize * 32;
-            out.write_u8(*num_bits).unwrap();
-            out.write(&block[0..block_size]).unwrap();
-        }
-
-        out
-    }
-
-    /// Creates a new `CVec` from raw bytes. This can be used together with `as_bytes`.
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, io::Error> {
-        let mut reader = Cursor::new(bytes);
-
-        let mut new = Self::new();
-
-        new.items = reader.read_u64::<LittleEndian>()? as usize;
-        let blocks = reader.read_u32::<LittleEndian>()?;
-
-        for _ in 0..blocks {
-            let num_bits = reader.read_u8()?;
-            let block_size = num_bits as usize * 32;
-
-            let mut block = vec![0u8; block_size];
-
-            reader.read_exact(&mut block)?;
-            new.data.push((num_bits, block.clone()));
-        }
-
-        Ok(new)
-    }
-
-    /// Decodes a byte sequence created by `as_bytes`, directly decompresses the integers and
-    /// stores them in a new `Vec<32>` which gets returned.
-    pub fn bytes_to_vec(bytes: &[u8]) -> Result<Vec<u32>, io::Error> {
-        let mut reader = Cursor::new(bytes);
-
-        let size = reader.read_u64::<LittleEndian>()? as usize;
-
-        let mut new_vec = Vec::with_capacity(size);
-
-        let blocks = reader.read_u32::<LittleEndian>()?;
-
-        let mut buf = Vec::with_capacity(256);
-        for _ in 0..blocks {
-            let num_bits = reader.read_u8()?;
-            let block_size = num_bits as usize * 32;
-
-            let mut block = vec![0u8; block_size];
-            reader.read_exact(&mut block)?;
-
-            Self::decompress(&block, num_bits, &mut buf);
-            new_vec.extend(buf.iter().take(size - new_vec.len()).copied());
-        }
-
-        Ok(new_vec)
     }
 
     /// Compresses a Vec<u32>
